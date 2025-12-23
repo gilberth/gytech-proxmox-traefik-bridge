@@ -1,19 +1,22 @@
 {
   "manifest_version": 3,
-  "name": "GYTECH Proxmox Exposer (LXC)",
-  "version": "5.1",
-  "description": "Trigger remoto vía LXC",
-  "permissions": ["activeTab", "scripting"],
-  "host_permissions": [
-    "https://10.10.10.200/*",
-    "http://10.10.10.50:9876/*",
-    "https://proxmox.local.gytech.com.pe/*"
-  ],
+  "name": "GYTECH Proxmox Traefik Bridge",
+  "version": "1.1",
+  "description": "Expose LXC containers via Traefik directly from Proxmox UI.",
+  "icons": {
+    "128": "icons/icon.svg"
+  },
   "content_scripts": [
     {
-      "matches": ["https://10.10.10.200/*"],
+      "matches": [
+        "*://10.10.10.200/*",
+        "*://proxmox.local.gytech.com.pe/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_end"
     }
+  ],
+  "host_permissions": [
+    "http://10.10.10.50/*"
   ]
 }
