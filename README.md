@@ -20,9 +20,9 @@ graph LR
     C -- Configures --> D[Traefik / DNS]
 ```
 
-📂 Estructura del Repositorio
-Plaintext
+## 📂 Estructura del Repositorio
 
+```plaintext
 gytech-proxmox-traefik-bridge/
 ├── chrome-extension/          # Código fuente de la extensión
 │   ├── manifest.json
@@ -33,87 +33,95 @@ gytech-proxmox-traefik-bridge/
 │   └── gytech-bridge.service
 └── proxmox-host/              # Script de ejecución final
     └── gytech-expose.sh
-🚀 Instalación y Despliegue
+```
+
+## 🚀 Instalación y Despliegue
+
 Sigue estos pasos en orden para configurar el entorno.
 
-Paso 1: Configurar el Proxmox Host (Servidor Físico)
-Accede por SSH a tu nodo Proxmox (root@pam).
+### Paso 1: Configurar el Proxmox Host (Servidor Físico)
 
-Copia el script proxmox-host/gytech-expose.sh a /root/.
+1. Accede por SSH a tu nodo Proxmox (root@pam).
 
-Dale permisos de ejecución:
+2. Copia el script `proxmox-host/gytech-expose.sh` a `/root/`.
 
-Bash
+3. Dale permisos de ejecución:
 
+```bash
 chmod +x /root/gytech-expose.sh
-(Opcional) Edita el script para ajustar tus rutas de Traefik o dominio base si es necesario.
+```
 
-Paso 2: Configurar el LXC Bridge (Contenedor Intermedio)
+4. (Opcional) Edita el script para ajustar tus rutas de Traefik o dominio base si es necesario.
+
+### Paso 2: Configurar el LXC Bridge (Contenedor Intermedio)
+
 Este contenedor actúa como puente de seguridad.
 
-Copia el script lxc-bridge/gytech_bridge.py a /root/ en el contenedor.
+1. Copia el script `lxc-bridge/gytech_bridge.py` a `/root/` en el contenedor.
 
-Edita gytech_bridge.py y verifica que la variable PROXMOX_HOST apunte a la IP de tu nodo Proxmox.
+2. Edita `gytech_bridge.py` y verifica que la variable `PROXMOX_HOST` apunte a la IP de tu nodo Proxmox.
 
-Configura el servicio systemd para que inicie automáticamente:
+3. Configura el servicio systemd para que inicie automáticamente:
+   - Copia `lxc-bridge/gytech-bridge.service` a `/etc/systemd/system/`.
+   - Recarga demonios y activa el servicio:
 
-Copia lxc-bridge/gytech-bridge.service a /etc/systemd/system/.
-
-Recarga demonios y activa el servicio:
-
-Bash
-
+```bash
 systemctl daemon-reload
 systemctl enable --now gytech-bridge
-IMPORTANTE (SSH Keys): El contenedor LXC debe poder conectarse por SSH al Host sin contraseña.
+```
 
-Bash
+4. **IMPORTANTE (SSH Keys):** El contenedor LXC debe poder conectarse por SSH al Host sin contraseña.
 
+```bash
 # En la consola del LXC:
 ssh-keygen -t rsa
 ssh-copy-id root@<IP_DEL_PROXMOX_HOST>
-Paso 3: Instalar la Extensión de Chrome
-Abre Google Chrome y ve a chrome://extensions.
+```
 
-Activa el "Modo de desarrollador" (esquina superior derecha).
+### Paso 3: Instalar la Extensión de Chrome
 
-Haz clic en "Cargar descomprimida" (Load unpacked).
+1. Abre Google Chrome y ve a `chrome://extensions`.
 
-Selecciona la carpeta chrome-extension de este repositorio.
+2. Activa el **"Modo de desarrollador"** (esquina superior derecha).
 
-Configuración: Si cambia la IP del contenedor LXC, edita la constante BRIDGE_URL en el archivo content.js y recarga la extensión.
+3. Haz clic en **"Cargar descomprimida"** (Load unpacked).
 
-💻 Uso
-Entra a la interfaz web de Proxmox.
+4. Selecciona la carpeta `chrome-extension` de este repositorio.
 
-Selecciona cualquier VM o Contenedor (LXC) en el menú izquierdo.
+5. **Configuración:** Si cambia la IP del contenedor LXC, edita la constante `BRIDGE_URL` en el archivo `content.js` y recarga la extensión.
 
-Verás un botón "🚀 GYTECH EXPOSE" en la barra superior (junto a Start/Shutdown).
+## 💻 Uso
 
-Haz clic en el botón.
+1. Entra a la interfaz web de Proxmox.
 
-Confirma el Nombre del Servicio (subdominio) y el Puerto Interno.
+2. Selecciona cualquier VM o Contenedor (LXC) en el menú izquierdo.
 
-Haz clic en EJECUTAR.
+3. Verás un botón **"🚀 GYTECH EXPOSE"** en la barra superior (junto a Start/Shutdown).
 
-El sistema te devolverá la URL generada (ej: https://influxdb.local.gytech.com.pe).
+4. Haz clic en el botón.
 
-🔧 Solución de Problemas
-Error "Network Error" en la extensión:
+5. Confirma el **Nombre del Servicio** (subdominio) y el **Puerto Interno**.
 
-Verifica que la IP en content.js sea la correcta del LXC.
+6. Haz clic en **EJECUTAR**.
 
-Asegúrate de estar accediendo a Proxmox vía HTTPS y que el navegador no esté bloqueando contenido mixto (si el bridge es HTTP).
+7. El sistema te devolverá la URL generada (ej: `https://influxdb.local.gytech.com.pe`).
 
-El botón no aparece:
+## 🔧 Solución de Problemas
 
-Recarga la página con F5.
+### Error "Network Error" en la extensión:
 
-Asegúrate de haber seleccionado una VM/CT.
+- Verifica que la IP en `content.js` sea la correcta del LXC.
+- Asegúrate de estar accediendo a Proxmox vía HTTPS y que el navegador no esté bloqueando contenido mixto (si el bridge es HTTP).
 
-Error "Permission denied" en el log:
+### El botón no aparece:
 
-Verifica las llaves SSH entre el LXC y el Host (ssh root@<host> date desde el LXC debería funcionar sin password).
+- Recarga la página con F5.
+- Asegúrate de haber seleccionado una VM/CT.
 
-📝 Licencia
-Propiedad de GYTECH. Uso interno para automatización de infraestructura.
+### Error "Permission denied" en el log:
+
+- Verifica las llaves SSH entre el LXC y el Host (`ssh root@<host> date` desde el LXC debería funcionar sin password).
+
+## 📝 Licencia
+
+Propiedad de **GYTECH**. Uso interno para automatización de infraestructura.
