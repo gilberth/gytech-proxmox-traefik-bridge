@@ -40,6 +40,25 @@ gytech-proxmox-traefik-bridge/
 
 ---
 
+## ⚙️ Referencia Rápida de Configuración
+
+Antes de empezar, identifica las IPs de tus servidores:
+
+| Componente | Descripción | Variable a Configurar | Archivo |
+|------------|-------------|----------------------|---------|
+| **Proxmox Host** | Servidor físico Proxmox | `PROXMOX_HOST` | `gytech_bridge.py` |
+| **LXC Bridge** | Contenedor Python (middleware) | `BRIDGE_URL` | `content.js` |
+| **Docker/Traefik** | Servidor con Traefik + `TRAEFIK_HOST` en DNS | `TRAEFIK_HOST`, `TRAEFIK_SSH_USER` | `gytech-expose.sh` |
+| **AdGuard Home** | Servidor DNS | `ADGUARD_HOST`, `ADGUARD_USER`, `ADGUARD_PASS` | `gytech-expose.sh` |
+
+**Ejemplo de infraestructura:**
+- Proxmox Host: `10.10.10.200`
+- LXC Bridge: `10.10.10.50` (puerto 9876)
+- Docker/Traefik: `10.10.10.232`
+- AdGuard: `10.10.10.xxx`
+
+---
+
 ## 🚀 Instalación y Despliegue
 
 Sigue estos pasos en orden para configurar el entorno completo.
@@ -111,13 +130,34 @@ ssh-copy-id root@10.10.10.232
 
 2. Copia el script `proxmox-host/gytech-expose.sh` a `/root/`.
 
-3. Dale permisos de ejecución:
+3. **IMPORTANTE:** Edita el script y configura las siguientes variables:
+
+```bash
+nano /root/gytech-expose.sh
+```
+
+**Variables a configurar:**
+
+```bash
+# Servidor Docker donde corre Traefik
+TRAEFIK_SSH_USER="user"              # Usuario SSH del servidor Docker
+TRAEFIK_HOST="10.10.10.232"          # IP del servidor Docker (cambiar por tu IP)
+TRAEFIK_DATA_PATH="/data/traefik/data/dynamic"  # Ruta donde Traefik busca configs
+
+# Servidor AdGuard Home (DNS)
+ADGUARD_HOST="10.10.10.xxx"          # IP de tu servidor AdGuard
+ADGUARD_USER="admin"                 # Usuario de AdGuard
+ADGUARD_PASS="admin"                 # Contraseña de AdGuard
+
+# Configuración de Dominio
+DOMAIN_SUFFIX=".local.gytech.com.pe" # Tu dominio base
+```
+
+4. Dale permisos de ejecución:
 
 ```bash
 chmod +x /root/gytech-expose.sh
 ```
-
-4. (Opcional) Edita el script para ajustar tus rutas de Traefik o dominio base si es necesario.
 
 ### Paso 4: Configurar el LXC Bridge (Contenedor Intermedio)
 
@@ -125,7 +165,20 @@ Este contenedor actúa como puente de seguridad.
 
 1. Copia el script `lxc-bridge/gytech_bridge.py` a `/root/` en el contenedor.
 
-2. Edita `gytech_bridge.py` y verifica que la variable `PROXMOX_HOST` apunte a la IP de tu nodo Proxmox.
+2. **IMPORTANTE:** Edita `gytech_bridge.py` y configura las siguientes variables:
+
+```bash
+nano /root/gytech_bridge.py
+```
+
+**Variables a configurar:**
+
+```python
+# --- CONFIGURACIÓN ---
+PORT = 9876                                    # Puerto del servidor Python (dejar en 9876)
+PROXMOX_HOST = "root@10.10.10.200"            # IP de tu nodo Proxmox (cambiar por tu IP)
+REMOTE_SCRIPT_PATH = "/root/gytech-expose.sh" # Ruta del script en Proxmox (dejar así)
+```
 
 3. Configura el servicio systemd para que inicie automáticamente:
    - Copia `lxc-bridge/gytech-bridge.service` a `/etc/systemd/system/`.
@@ -144,17 +197,39 @@ ssh-keygen -t rsa
 ssh-copy-id root@<IP_DEL_PROXMOX_HOST>
 ```
 
+5. Verifica que el servicio esté corriendo:
+
+```bash
+systemctl status gytech-bridge
+# Deberías ver: "GYTECH Bridge (Name-Aware) corriendo en puerto 9876..."
+```
+
 ### Paso 5: Instalar la Extensión de Chrome
 
-1. Abre Google Chrome y ve a `chrome://extensions`.
+1. **ANTES DE INSTALAR:** Edita la configuración del Bridge URL.
 
-2. Activa el **"Modo de desarrollador"** (esquina superior derecha).
+```bash
+nano chrome-extension/content.js
+```
 
-3. Haz clic en **"Cargar descomprimida"** (Load unpacked).
+**Variable a configurar (línea 2):**
 
-4. Selecciona la carpeta `chrome-extension` de este repositorio.
+```javascript
+// --- CONFIGURACIÓN ---
+const BRIDGE_URL = 'http://10.10.10.50:9876/expose';  // Cambiar 10.10.10.50 por la IP de tu LXC Bridge
+```
 
-5. **Configuración:** Si cambia la IP del contenedor LXC, edita la constante `BRIDGE_URL` en el archivo `content.js` y recarga la extensión.
+> **Importante:** La IP debe ser la del **contenedor LXC Bridge** (donde corre gytech_bridge.py), NO la del Proxmox Host.
+
+2. Abre Google Chrome y ve a `chrome://extensions`.
+
+3. Activa el **"Modo de desarrollador"** (esquina superior derecha).
+
+4. Haz clic en **"Cargar descomprimida"** (Load unpacked).
+
+5. Selecciona la carpeta `chrome-extension` de este repositorio.
+
+6. La extensión está lista. Verás el botón **🚀 GYTECH Expose** cuando accedas a Proxmox.
 
 ---
 
