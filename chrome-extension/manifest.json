@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "GYTECH Proxmox Exposer (LXC)",
+  "version": "5.1",
+  "description": "Trigger remoto vía LXC",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": [
+    "https://10.10.10.200/*",
+    "http://10.10.10.50:9876/*",
+    "https://proxmox.local.gytech.com.pe/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://10.10.10.200/*"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ]
+}
