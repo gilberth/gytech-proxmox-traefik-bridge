@@ -1,0 +1,15 @@
+
+[Unit]
+Description=GYTECH Python Bridge Service
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /root/gytech_bridge.py
+WorkingDirectory=/root
+StandardOutput=inherit
+StandardError=inherit
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
