@@ -15,9 +15,9 @@ El sistema funciona mediante tres componentes conectados:
 
 ```mermaid
 graph LR
-    A[Browser / Chrome Ext] -- HTTP JSON --> B[LXC Bridge (Python)]
-    B -- SSH Command --> C[Proxmox Host (Bash)]
-    C -- Configures --> D[Traefik / DNS]
+    A["Browser / Chrome Ext"] -- "HTTP JSON" --> B["LXC Bridge (Python)"]
+    B -- "SSH Command" --> C["Proxmox Host (Bash)"]
+    C -- "Configures" --> D["Traefik / DNS"]
 ```
 
 ## 📂 Estructura del Repositorio
