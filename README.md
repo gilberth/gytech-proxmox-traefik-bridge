@@ -35,6 +35,7 @@ gytech-proxmox-traefik-bridge/
 │   └── gytech-bridge.service
 └── proxmox-host/              # Script de ejecución final
     └── gytech-expose.sh       # Instalar en TODOS los nodos físicos
+    
 🚀 Instalación y Despliegue
 Sigue estos pasos en orden para configurar el entorno completo.
 
