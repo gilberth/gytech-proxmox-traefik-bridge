@@ -2,231 +2,141 @@
 
 ![GYTECH Status](https://img.shields.io/badge/status-active-success) ![Proxmox](https://img.shields.io/badge/Proxmox-VE-E57000) ![Traefik](https://img.shields.io/badge/Traefik-Proxy-24a1c1)
 
-Herramienta de automatización personalizada para **GYTECH**. Esta solución inyecta un botón nativo en la interfaz web de Proxmox VE que permite exponer servicios de contenedores LXC a través de Traefik y DNS con un solo clic.
+Herramienta de automatización personalizada para **GYTECH**. Esta solución inyecta un botón nativo en la interfaz web de Proxmox VE que permite exponer servicios de contenedores LXC a través de Traefik y DNS con un solo clic, soportando **múltiples nodos en clúster**.
 
 ---
 
 ## 🏗️ Arquitectura
 
-El sistema funciona mediante tres componentes conectados:
+El sistema funciona mediante una cadena de componentes distribuidos:
 
-1. **Chrome Extension (Frontend):** Inyecta el botón "🚀 GYTECH Expose" en la UI de Proxmox. Detecta el ID y Nombre del contenedor y solicita el puerto interno.
-2. **LXC Bridge (Middleware):** Un servidor ligero en Python que recibe la petición HTTP de la extensión y la traduce a un comando de sistema seguro.
-3. **Proxmox Host (Backend):** Ejecuta el script Bash final que configura las reglas de Traefik/DNS.
+1.  **Chrome Extension (Frontend):** Inyecta el botón "🚀 GYTECH Expose". Detecta inteligentemente el **ID**, **Nombre** y el **Nodo** (ej: `proxmox2`) donde reside el contenedor.
+2.  **LXC Bridge (Middleware):** Servidor Python que recibe la petición, busca la IP del nodo correspondiente en su mapa interno y se conecta vía SSH.
+3.  **Proxmox Node (Worker):** Ejecuta el script Bash localmente, genera la configuración YAML y la envía vía **SCP** al servidor central de Docker/Traefik.
+4.  **Docker Server (Backend):** Traefik detecta el nuevo archivo en caliente y expone el servicio.
 
 ```mermaid
 graph LR
-    A["Browser / Chrome Ext"] -- "HTTP JSON" --> B["LXC Bridge (Python)"]
-    B -- "SSH Command" --> C["Proxmox Host (Bash)"]
-    C -- "Configures" --> D["Traefik / DNS"]
+    A["Browser / Chrome Ext"] -- "JSON (ID, Name, Node)" --> B["LXC Bridge (Python)"]
+    B -- "SSH (Selects IP from Map)" --> C["Proxmox Node (Bash)"]
+    C -- "Generates YAML & SCP" --> D["Docker Server (Traefik)"]
+
 ```
+    📂 Estructura del Repositorio
+Plaintext
 
----
-
-## 📂 Estructura del Repositorio
-
-```plaintext
 gytech-proxmox-traefik-bridge/
 ├── chrome-extension/          # Código fuente de la extensión
 │   ├── manifest.json
 │   ├── content.js
 │   └── icons/
 ├── lxc-bridge/                # Servidor intermedio (Python)
-│   ├── gytech_bridge.py
+│   ├── gytech_bridge.py       # Configurar NODE_MAP aquí
 │   └── gytech-bridge.service
 └── proxmox-host/              # Script de ejecución final
-    └── gytech-expose.sh
-```
-
----
-
-## 🚀 Instalación y Despliegue
-
+    └── gytech-expose.sh       # Instalar en TODOS los nodos físicos
+🚀 Instalación y Despliegue
 Sigue estos pasos en orden para configurar el entorno completo.
 
-### Paso 1: Configurar el Servidor Docker/Traefik (Solo una vez)
+Paso 1: Configurar el Servidor Docker/Traefik (Destino Final)
+Traefik debe estar configurado para leer archivos dinámicos desde una carpeta.
 
-Para que Traefik detecte los archivos generados por el script, debes configurar la carga dinámica mediante carpeta.
+A. En tu docker-compose.yaml (Servicio Traefik): Asegúrate de tener mapeado el volumen para configuraciones dinámicas:
 
-#### A. Estructura de Carpetas
+YAML
 
-Ejecuta esto en tu servidor Docker dentro de la carpeta traefik:
-
-```bash
-mkdir -p ./data/dynamic
-# Si tienes un config actual, muévelo:
-mv ./data/config.yml ./data/dynamic/
-```
-
-#### B. Modificar docker-compose.yaml
-
-Edita tu archivo y actualiza la sección `volumes` del servicio Traefik:
-
-```yaml
-services:
-  traefik:
-    # ... otras configuraciones ...
     volumes:
-      - /etc/localtime:/etc/localtime:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./data/traefik.yml:/traefik.yml:ro
-      - ./data/acme.json:/acme.json
+      - ./data/dynamic:/dynamic_conf  # 🟢 Carpeta donde llegarán los archivos
+B. En tu traefik.yml: Habilita el proveedor de archivos:
 
-      # 🟢 NUEVO: Mapeo de carpeta dinámica
-      - ./data/dynamic:/dynamic_conf
-```
+YAML
 
-#### C. Modificar data/traefik.yml
-
-Dile a Traefik que vigile el directorio `/dynamic_conf`:
-
-```yaml
 providers:
   file:
-    directory: /dynamic_conf  # <-- IMPORTANTE: usar directory, no filename
+    directory: /dynamic_conf
     watch: true
-```
+Paso 2: Configurar los Nodos Proxmox (Físicos)
+Realiza esto en CADA NODO de tu clúster (proxmox, proxmox2, etc.).
 
-#### D. Aplicar cambios
+Copia el script proxmox-host/gytech-expose.sh a /root/.
 
-```bash
-docker compose up -d --force-recreate
-```
+Dale permisos de ejecución: chmod +x /root/gytech-expose.sh
 
-### Paso 2: Configurar SSH (Proxmox → Docker)
+Edita el script y configura la IP de tu Docker Server:
 
-El nodo Proxmox debe poder enviar archivos al servidor Docker sin contraseña. Ejecuta esto **en la consola de Proxmox** (solo una vez):
+Bash
 
-```bash
-# Generar llave (si no existe) -> Enter a todo
-ssh-keygen -t rsa
+TRAEFIK_HOST="root@10.10.10.232"
+Configurar SSH hacia Docker: El nodo Proxmox debe poder enviar archivos al Docker Server sin contraseña.
 
-# Copiar llave al servidor Docker (pedirá password una vez)
+Bash
+
+# En la consola de CADA nodo Proxmox:
 ssh-copy-id root@10.10.10.232
-```
+Paso 3: Configurar el LXC Bridge (Intermediario)
+Este contenedor orquesta las peticiones.
 
-### Paso 3: Configurar el Proxmox Host (Servidor Físico)
+Copia lxc-bridge/gytech_bridge.py a /root/ en el contenedor.
 
-1. Accede por SSH a tu nodo Proxmox (root@pam).
+Configurar Mapa de Nodos: Edita el archivo .py y actualiza la variable NODE_MAP con las IPs de tus nodos físicos:
 
-2. Copia el script `proxmox-host/gytech-expose.sh` a `/root/`.
+Python
 
-3. Dale permisos de ejecución:
+NODE_MAP = {
+    "proxmox": "root@10.10.10.200",
+    "proxmox2": "root@10.10.10.201"
+}
+Instala y activa el servicio systemd (gytech-bridge.service).
 
-```bash
-chmod +x /root/gytech-expose.sh
-```
+Configurar SSH hacia los Nodos: El LXC debe poder entrar a todos los nodos físicos.
 
-4. (Opcional) Edita el script para ajustar tus rutas de Traefik o dominio base si es necesario.
+Bash
 
-### Paso 4: Configurar el LXC Bridge (Contenedor Intermedio)
-
-Este contenedor actúa como puente de seguridad.
-
-1. Copia el script `lxc-bridge/gytech_bridge.py` a `/root/` en el contenedor.
-
-2. Edita `gytech_bridge.py` y verifica que la variable `PROXMOX_HOST` apunte a la IP de tu nodo Proxmox.
-
-3. Configura el servicio systemd para que inicie automáticamente:
-   - Copia `lxc-bridge/gytech-bridge.service` a `/etc/systemd/system/`.
-   - Recarga demonios y activa el servicio:
-
-```bash
-systemctl daemon-reload
-systemctl enable --now gytech-bridge
-```
-
-4. **IMPORTANTE (SSH Keys):** El contenedor LXC debe poder conectarse por SSH al Host sin contraseña.
-
-```bash
 # En la consola del LXC:
-ssh-keygen -t rsa
-ssh-copy-id root@<IP_DEL_PROXMOX_HOST>
-```
+ssh-copy-id root@10.10.10.200
+ssh-copy-id root@10.10.10.201
+Paso 4: Instalar la Extensión de Chrome
+Carga la carpeta chrome-extension en modo desarrollador (chrome://extensions).
 
-### Paso 5: Instalar la Extensión de Chrome
+Si la IP del LXC cambia, actualiza BRIDGE_URL en content.js.
 
-1. Abre Google Chrome y ve a `chrome://extensions`.
+💻 Uso
+Vía Interfaz Web (Recomendado)
+Navega a la web de Proxmox.
 
-2. Activa el **"Modo de desarrollador"** (esquina superior derecha).
+Selecciona un contenedor en cualquier nodo.
 
-3. Haz clic en **"Cargar descomprimida"** (Load unpacked).
+Clic en "🚀 GYTECH EXPOSE".
 
-4. Selecciona la carpeta `chrome-extension` de este repositorio.
+Confirma nombre y puerto.
 
-5. **Configuración:** Si cambia la IP del contenedor LXC, edita la constante `BRIDGE_URL` en el archivo `content.js` y recarga la extensión.
+¡Listo! La URL aparecerá en pantalla y el servicio estará activo en segundos.
 
----
+Vía Terminal (Debugging)
+Puedes ejecutar el script manualmente desde el nodo donde vive el contenedor:
 
-## 💻 Uso
+Bash
 
-### Opción 1: Interfaz Web (Extensión de Chrome)
+# Uso: ./gytech-expose.sh <VMID> <NOMBRE> <PUERTO>
+./gytech-expose.sh 103 frigate 5000
+🔧 Solución de Problemas Clásicos
+Error: "Permission denied (publickey)"
 
-1. Entra a la interfaz web de Proxmox.
+Si falla el Bridge: Faltan llaves SSH del LXC -> Nodos Proxmox.
 
-2. Selecciona cualquier VM o Contenedor (LXC) en el menú izquierdo.
+Si falla el Script: Faltan llaves SSH de los Nodos Proxmox -> Docker Server.
 
-3. Verás un botón **"🚀 GYTECH EXPOSE"** en la barra superior (junto a Start/Shutdown).
+El botón dice "Éxito" pero no funciona la URL:
 
-4. Haz clic en el botón.
+Revisa si el archivo .yml llegó al servidor Docker: ls /data/traefik/data/dynamic.
 
-5. Confirma el **Nombre del Servicio** (subdominio) y el **Puerto Interno**.
+Si el archivo está ahí, revisa logs de Traefik: docker logs traefik.
 
-6. Haz clic en **EJECUTAR**.
+Error al cambiar de Nodo:
 
-7. El sistema te devolverá la URL generada (ej: `https://influxdb.local.gytech.com.pe`).
+Asegúrate de que el script gytech-expose.sh existe en el nuevo nodo y tiene permisos +x.
 
-### Opción 2: Línea de Comandos (Script Manual)
+Verifica que agregaste el nuevo nodo al NODE_MAP en el script de Python.
 
-Ejecuta el script desde Proxmox cada vez que crees un nuevo LXC.
-
-**Sintaxis:** `./gytech-expose.sh <VMID> <NOMBRE> [PUERTO]`
-
-**Ejemplos:**
-
-#### 1. Servicio Web Estándar (Puerto 80)
-
-```bash
-./gytech-expose.sh 105 wiki
-```
-
-_Crea:_ `https://wiki.local.gytech.com.pe` apuntando al puerto 80 del LXC.
-
-#### 2. Servicio con Puerto Personalizado
-
-```bash
-./gytech-expose.sh 106 portainer 9000
-```
-
-_Crea:_ `https://portainer.local.gytech.com.pe` apuntando al puerto 9000 del LXC.
-
----
-
-## 🔧 Solución de Problemas
-
-### Error "Network Error" en la extensión:
-
-- Verifica que la IP en `content.js` sea la correcta del LXC.
-- Asegúrate de estar accediendo a Proxmox vía HTTPS y que el navegador no esté bloqueando contenido mixto (si el bridge es HTTP).
-
-### El botón no aparece:
-
-- Recarga la página con F5.
-- Asegúrate de haber seleccionado una VM/CT.
-
-### Error "Permission denied" en el log:
-
-- Verifica las llaves SSH entre el LXC y el Host (`ssh root@<host> date` desde el LXC debería funcionar sin password).
-- Verifica las llaves SSH entre Proxmox y Docker (`ssh root@10.10.10.232 date` desde Proxmox debería funcionar sin password).
-
-### Traefik no detecta los cambios:
-
-- Verifica que el directorio `/dynamic_conf` esté correctamente montado en el contenedor.
-- Revisa los logs de Traefik: `docker logs traefik`
-- Asegúrate de que `watch: true` esté configurado en `traefik.yml`
-
----
-
-## 📝 Licencia
-
-Propiedad de **GYTECH**. Uso interno para automatización de infraestructura.
+📝 Licencia
+Propiedad de GYTECH. Uso interno para automatización de infraestructura.
