@@ -1,88 +1,63 @@
 #!/bin/bash
 
-# ==============================================================================
-# GYTECH AUTOMATION - EXPOSE LXC TO TRAEFIK & ADGUARD
-# Autor: Gilberth (GYTECH)
-# Descripción: Automatiza la creación de DNS y Reglas de Enrutamiento para LXC.
-# ==============================================================================
+# --- CONFIGURACIÓN CENTRALIZADA ---
+# Servidor donde corre Traefik (DockerServer)
+TRAEFIK_HOST="root@10.10.10.232"
+# Ruta absoluta donde Traefik busca los archivos dinámicos
+TRAEFIK_REMOTE_PATH="/data/traefik/data/dynamic"
+# Tu dominio base
+DOMAIN="local.gytech.com.pe"
 
-# --- CONFIGURACIÓN DE INFRAESTRUCTURA ---
-# Servidor Docker donde corre Traefik
-TRAEFIK_SSH_USER="user"
-TRAEFIK_HOST="10.10.10.xxxx"
-# Ruta ABSOLUTA en el servidor Docker donde Traefik busca configuraciones dinámicas
-TRAEFIK_DATA_PATH="/data/traefik/data/dynamic"
+# Argumentos recibidos desde el Bridge Python
+CT_ID=$1
+CT_NAME=$2
+CT_PORT=$3
 
-# Servidor AdGuard Home (DNS)
-ADGUARD_HOST="10.10.10.xxx"
-ADGUARD_USER="admin"
-ADGUARD_PASS="admin" # ⚠️ Se recomienda usar variables de entorno para mayor seguridad
-
-# Configuración de Dominio
-DOMAIN_SUFFIX=".local.gytech.com.pe"
-
-# --- VALIDACIÓN DE ARGUMENTOS ---
-if [ "$#" -lt 2 ]; then
-    echo "❌ Error de Uso."
-    echo "Sintaxis: $0 <VMID> <NOMBRE_SERVICIO> [PUERTO]"
-    echo "Ejemplos:"
-    echo "  $0 105 grafana        (Usa puerto 80 por defecto)"
-    echo "  $0 106 portainer 9000 (Usa puerto 9000)"
+# Validación de argumentos
+if [ -z "$CT_ID" ] || [ -z "$CT_NAME" ] || [ -z "$CT_PORT" ]; then
+    echo "Error: Faltan argumentos. Uso: $0 <vmid> <nombre> <puerto>"
     exit 1
 fi
 
-VMID=$1
-RAW_NAME=$2
-PORT=${3:-80} # Si no se especifica 3er argumento, usa 80.
+# 1. Obtener la IP del contenedor (se ejecuta localmente en el nodo donde vive el CT)
+CT_IP=$(pct exec $CT_ID -- ip -4 addr show eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
 
-# 1. LIMPIEZA DE NOMBRE
-# Permite ingresar "servicio" o "servicio.local.gytech..." y funciona igual.
-SERVICE_NAME=${RAW_NAME%%.*}
-FULL_DOMAIN="${SERVICE_NAME}${DOMAIN_SUFFIX}"
-
-# 2. OBTENER IP DEL LXC DESDE PROXMOX
-echo "🔍 [1/3] Buscando IP del contenedor $VMID..."
-LXC_IP=$(pct exec $VMID -- ip -4 addr show eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
-
-if [ -z "$LXC_IP" ]; then
-    echo "❌ Error: No se pudo detectar la IP. Verifica que el LXC ($VMID) esté ENCENDIDO."
-    exit 1
+if [ -z "$CT_IP" ]; then
+  echo "Error: No se pudo obtener la IP del contenedor $CT_ID. ¿Está encendido?"
+  exit 1
 fi
-echo "✅ IP Detectada: $LXC_IP"
 
-# 3. CONFIGURAR ADGUARD (DNS REWRITE)
-echo "📡 [2/3] Creando registro DNS ($FULL_DOMAIN -> $TRAEFIK_HOST)..."
-curl -s -u "$ADGUARD_USER:$ADGUARD_PASS" -H "Content-Type: application/json" \
-    -d "{\"domain\": \"$FULL_DOMAIN\", \"answer\": \"$TRAEFIK_HOST\"}" \
-    http://$ADGUARD_HOST/control/rewrite/add > /dev/null
+# 2. Generar el contenido YAML en un archivo temporal local
+TMP_FILE="/tmp/${CT_NAME}.yml"
 
-# 4. GENERAR E INYECTAR CONFIGURACIÓN EN TRAEFIK
-echo "🚀 [3/3] Inyectando configuración en Traefik..."
-
-# Definición del archivo YAML (Heredoc)
-YAML_CONTENT="http:
+cat <<EOF > "$TMP_FILE"
+http:
   routers:
-    ${SERVICE_NAME}:
-      entryPoints:
-        - https
-      middlewares:
-        - default-headers
-        - https-redirectscheme
-      rule: \"Host(\`${FULL_DOMAIN}\`)\"
-      service: \"${SERVICE_NAME}\"
+    ${CT_NAME}:
+      entryPoints: ["https"]
+      middlewares: ["default-headers", "https-redirectscheme"]
+      rule: "Host(\`${CT_NAME}.${DOMAIN}\`)"
+      service: "${CT_NAME}"
       tls:
-        certResolver: cloudflare
-
+        certResolver: "cloudflare"
   services:
-    ${SERVICE_NAME}:
+    ${CT_NAME}:
       loadBalancer:
         passHostHeader: true
         servers:
-          - url: \"http://${LXC_IP}:${PORT}\""
+          - url: "http://${CT_IP}:${CT_PORT}"
+EOF
 
-# Envío seguro por SSH usando tubería (evita errores de comillas)
-echo "$YAML_CONTENT" | ssh -o BatchMode=yes -o StrictHostKeyChecking=no $TRAEFIK_SSH_USER@$TRAEFIK_HOST "cat > ${TRAEFIK_DATA_PATH}/${SERVICE_NAME}.yml"
+# 3. ENVIAR AL DOCKERSERVER (SCP)
+# Aquí ocurre la magia: enviamos el archivo generado al servidor central
+scp -o StrictHostKeyChecking=no "$TMP_FILE" "${TRAEFIK_HOST}:${TRAEFIK_REMOTE_PATH}/"
 
-echo "✅ DESPLIEGUE EXITOSO"
-echo "🔗 URL: https://$FULL_DOMAIN"
-echo "🎯 Destino: http://$LXC_IP:$PORT"
+if [ $? -eq 0 ]; then
+  # Si la copia fue exitosa, devolvemos la URL final a la extensión
+  echo "https://${CT_NAME}.${DOMAIN}"
+  rm "$TMP_FILE" # Borramos el temporal local
+else
+  echo "Error crítico: No se pudo enviar el archivo al DockerServer ($TRAEFIK_HOST)"
+  rm "$TMP_FILE"
+  exit 1
+fi
